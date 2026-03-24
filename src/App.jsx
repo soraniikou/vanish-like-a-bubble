@@ -56,6 +56,9 @@ const BURST_DURATIONS = BURST_SECOND_OPTIONS.map((s) => s * BURST_FPS);
 
 const BUBBLE_MOTION_SCALE = 0.5;
 
+/** 5秒ごとに装飾泡を 2〜3 個ランダムに割る */
+const AUTO_POP_INTERVAL_MS = 5000;
+
 class AmbientBubble {
   constructor(W, H) {
     this.reset(W, H, true);
@@ -159,6 +162,81 @@ class AmbientBubble {
 
 function ambientCountForViewport(W, H) {
   return Math.min(47, Math.max(17, Math.floor((W * H) / 29000)));
+}
+
+/** 定期割れ用の破裂パーティクル（装飾泡と同系の見た目） */
+class AmbientPopBurst {
+  constructor(x, y) {
+    this.particles = [];
+    const n = 12 + Math.floor(Math.random() * 8);
+    for (let i = 0; i < n; i++) {
+      const ang = ((Math.PI * 2) / n) * i + Math.random() * 0.55;
+      const sp = (0.4 + Math.random() * 2.2) * BUBBLE_MOTION_SCALE;
+      this.particles.push({
+        x,
+        y,
+        vx: Math.cos(ang) * sp,
+        vy: Math.sin(ang) * sp - 0.35,
+        opacity: 0.8 + Math.random() * 0.18,
+        size: 1.4 + Math.random() * 2.6,
+        glow: 1,
+        color: [PETAL.pale, PETAL.blush, PETAL.violet, "#ffffff"][
+          Math.floor(Math.random() * 4)
+        ],
+      });
+    }
+    this.life = 50 + Math.floor(Math.random() * 24);
+  }
+
+  update() {
+    const fadeSpeed = 1 / this.life;
+    this.particles.forEach((p) => {
+      p.x += p.vx * BUBBLE_MOTION_SCALE;
+      p.y += p.vy * BUBBLE_MOTION_SCALE;
+      p.vy += 0.06 * BUBBLE_MOTION_SCALE;
+      p.vx *= 0.97;
+      p.opacity -= fadeSpeed * 0.88;
+      p.size *= 0.991;
+      p.glow = Math.max(0, p.glow - fadeSpeed * 0.5);
+    });
+    this.particles = this.particles.filter((p) => p.opacity > 0.03);
+  }
+
+  draw(ctx) {
+    this.particles.forEach((p) => {
+      ctx.save();
+      if (p.glow > 0) {
+        ctx.globalAlpha = p.opacity * p.glow * 0.38;
+        const g = ctx.createRadialGradient(
+          p.x,
+          p.y,
+          0,
+          p.x,
+          p.y,
+          p.size * 3.5
+        );
+        g.addColorStop(0, p.color);
+        g.addColorStop(1, "transparent");
+        ctx.fillStyle = g;
+        ctx.fillRect(
+          p.x - p.size * 3.5,
+          p.y - p.size * 3.5,
+          p.size * 7,
+          p.size * 7
+        );
+      }
+      ctx.globalAlpha = p.opacity;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  isAlive() {
+    return this.particles.length > 0;
+  }
 }
 
 class Bubble {
@@ -334,6 +412,8 @@ export default function App() {
   const lastViewportRef = useRef({ w: 0, h: 0 });
   const animRef = useRef(null);
   const bgClockStartRef = useRef(null);
+  const autoPopBurstsRef = useRef([]);
+  const lastAutoPopTimeRef = useRef(null);
 
   const [text, setText] = useState("");
   const [launched, setLaunched] = useState(false);
@@ -394,8 +474,43 @@ export default function App() {
 
     ambientRef.current.forEach((a) => {
       a.update(W, H);
+    });
+
+    if (ambientReleasedRef.current && ambientRef.current.length > 0) {
+      const nowPop = performance.now();
+      if (lastAutoPopTimeRef.current == null) {
+        lastAutoPopTimeRef.current = nowPop;
+      }
+      if (nowPop - lastAutoPopTimeRef.current >= AUTO_POP_INTERVAL_MS) {
+        lastAutoPopTimeRef.current = nowPop;
+        const arr = ambientRef.current;
+        const want = 2 + Math.floor(Math.random() * 2);
+        const nPop = Math.min(want, arr.length);
+        const removeIdx = new Set();
+        while (removeIdx.size < nPop) {
+          removeIdx.add(Math.floor(Math.random() * arr.length));
+        }
+        removeIdx.forEach((idx) => {
+          const dead = arr[idx];
+          autoPopBurstsRef.current.push(
+            new AmbientPopBurst(dead.x, dead.y)
+          );
+        });
+        ambientRef.current = arr.filter((_, i) => !removeIdx.has(i));
+      }
+    }
+
+    ambientRef.current.forEach((a) => {
       a.draw(ctx);
     });
+
+    autoPopBurstsRef.current.forEach((burst) => {
+      burst.update();
+      burst.draw(ctx);
+    });
+    autoPopBurstsRef.current = autoPopBurstsRef.current.filter((b) =>
+      b.isAlive()
+    );
 
     bubblesRef.current.forEach((b) => {
       b.update(null);
@@ -438,6 +553,7 @@ export default function App() {
     const y = H * 0.75 + Math.random() * H * 0.1;
     bubblesRef.current.push(new Bubble(x, y, t, size));
     ambientReleasedRef.current = true;
+    lastAutoPopTimeRef.current = null;
     setText("");
     setLaunched(true);
     setHint(false);

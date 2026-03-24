@@ -8,6 +8,21 @@ const PETAL = {
   core: "#5a2d5a",
 };
 
+/** 文字付き泡が割れた位置に出すメッセージ（ランダム1件） */
+const BURST_FLOAT_MESSAGES = [
+  "それでよかったんだよ",
+  "もう、忘れていいよ",
+  "消してよかったね",
+  "あとは風に任せてみて",
+  "ここに置いていくのは自由だよ",
+  "一時の痛みだよ",
+  "そう、揺れてもいいの",
+  "どうか解き放ってね",
+  "現実を解き放ってぅださい",
+  "現実から離れてみる",
+  "泡みたいに現実をけしてみる",
+];
+
 /**
  * 背景ローテーション：黒 → 濃い紫 → 濃い紺 → 紺 → 青 → 深い緑 → 黄緑 → 淡いピンク →（ループ）
  * 各セグメント 10 秒、隣り合う色の RGB を smoothstep で補間
@@ -55,6 +70,92 @@ const BURST_FPS = 60;
 const BURST_DURATIONS = BURST_SECOND_OPTIONS.map((s) => s * BURST_FPS);
 
 const BUBBLE_MOTION_SCALE = 0.5;
+
+/** Web Audio 用（文字付き泡の破裂音のみ） */
+const bubbleAudioBridge = { ctx: null };
+
+/** 1オクターブ下の落ち着いた管ベル音程（元: 1047 / 1319 / 1568 / 2093） */
+const WIND_CHIME_FREQS = [523.25, 659.25, 783.99, 1046.5];
+const WIND_CHIME_START_OFFSETS = [0, 0.15, 0.3, 0.5];
+const WIND_CHIME_DETUNE_CENTS = [-5, 4, -3, 6];
+
+/**
+ * ウィンドベル風：4音をずらして連なるように重ね、Delay＋弱いフィードバックで余韻。
+ * マスターは控えめ（約 0.065）・6 秒フェードはそのまま。
+ */
+function playWindChimeBurst(audioCtx) {
+  if (!audioCtx) return;
+  try {
+    const t0 = audioCtx.currentTime;
+    const master = audioCtx.createGain();
+    master.connect(audioCtx.destination);
+    master.gain.setValueAtTime(0.0001, t0);
+    master.gain.linearRampToValueAtTime(0.065, t0 + 0.14);
+    master.gain.linearRampToValueAtTime(0, t0 + 6);
+
+    WIND_CHIME_FREQS.forEach((freq, i) => {
+      const tStart = t0 + WIND_CHIME_START_OFFSETS[i];
+      const osc = audioCtx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, tStart);
+      osc.detune.setValueAtTime(WIND_CHIME_DETUNE_CENTS[i], tStart);
+
+      const noteGain = audioCtx.createGain();
+      noteGain.gain.setValueAtTime(0.0001, tStart);
+      noteGain.gain.exponentialRampToValueAtTime(0.26, tStart + 0.07);
+      noteGain.gain.exponentialRampToValueAtTime(0.0004, tStart + 5.8);
+
+      const delay = audioCtx.createDelay(1.0);
+      delay.delayTime.value = 0.095 + i * 0.028;
+
+      const feedback = audioCtx.createGain();
+      feedback.gain.value = 0.13;
+
+      const wet = audioCtx.createGain();
+      wet.gain.value = 0.62;
+
+      const dry = audioCtx.createGain();
+      dry.gain.value = 0.38;
+
+      osc.connect(noteGain);
+      noteGain.connect(delay);
+      noteGain.connect(dry);
+      dry.connect(master);
+      delay.connect(wet);
+      wet.connect(master);
+      delay.connect(feedback);
+      feedback.connect(delay);
+
+      osc.start(tStart);
+      osc.stop(tStart + 6.2);
+    });
+  } catch (_) {
+    /* suspended など */
+  }
+}
+
+/** HSL（h:0–360, s/l:%）→ RGB 0–255 */
+function hslToRgb(h, s, l) {
+  s /= 100;
+  l /= 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let rp = 0;
+  let gp = 0;
+  let bp = 0;
+  if (h < 60) [rp, gp, bp] = [c, x, 0];
+  else if (h < 120) [rp, gp, bp] = [x, c, 0];
+  else if (h < 180) [rp, gp, bp] = [0, c, x];
+  else if (h < 240) [rp, gp, bp] = [0, x, c];
+  else if (h < 300) [rp, gp, bp] = [x, 0, c];
+  else [rp, gp, bp] = [c, 0, x];
+  return [
+    Math.round((rp + m) * 255),
+    Math.round((gp + m) * 255),
+    Math.round((bp + m) * 255),
+  ];
+}
 
 /** 5秒ごとに装飾泡を 2〜3 個ランダムに割る */
 const AUTO_POP_INTERVAL_MS = 5000;
@@ -252,7 +353,9 @@ class Bubble {
     this.phase = "float";
     this.burstParticles = [];
     this.age = 0;
-    this.maxAge = 180 + Math.random() * 120;
+    const baseMaxAge = 180 + Math.random() * 120;
+    this.maxAge =
+      text && text.trim().length > 0 ? baseMaxAge * 2 : baseMaxAge;
     this.wobble = Math.random() * Math.PI * 2;
     this.wobbleSpeed = (0.02 + Math.random() * 0.02) * BUBBLE_MOTION_SCALE;
     this.burstDuration =
@@ -270,7 +373,7 @@ class Bubble {
       this.vy *= 0.995;
       if (this.age >= this.maxAge) {
         this.burst();
-        if (onBurst) onBurst();
+        if (onBurst) onBurst(this);
       }
     } else {
       const fadeSpeed = 1 / this.burstDuration;
@@ -291,8 +394,15 @@ class Bubble {
   }
 
   burst() {
+    if (this.text && this.text.trim().length > 0) {
+      playWindChimeBurst(bubbleAudioBridge.ctx);
+    }
     this.phase = "burst";
     const count = 20 + Math.floor(Math.random() * 10);
+    const msgBubble = this.text && this.text.trim().length > 0;
+    const burstPalette = msgBubble
+      ? ["#d8f8ff", "#a8e8f5", "#7dd3eb", "#ffffff"]
+      : [PETAL.pale, PETAL.blush, PETAL.violet, "#ffffff"];
     for (let i = 0; i < count; i++) {
       const angle = ((Math.PI * 2) / count) * i + Math.random() * 0.4;
       const speed = 0.5 + Math.random() * 3.0;
@@ -304,15 +414,14 @@ class Bubble {
         opacity: 0.9 + Math.random() * 0.1,
         size: 2 + Math.random() * 4,
         glow: 1.2,
-        color: [PETAL.pale, PETAL.blush, PETAL.violet, "#ffffff"][
-          Math.floor(Math.random() * 4)
-        ],
+        color: burstPalette[Math.floor(Math.random() * burstPalette.length)],
       });
     }
   }
 
   drawFloat(ctx) {
     const r = this.size / 2;
+    const msgBubble = this.text && this.text.trim().length > 0;
     ctx.save();
     ctx.globalAlpha = this.opacity;
 
@@ -324,8 +433,13 @@ class Bubble {
       this.y,
       r * 1.4
     );
-    glow.addColorStop(0, `rgba(200,160,200,0.08)`);
-    glow.addColorStop(1, `rgba(200,160,200,0)`);
+    if (msgBubble) {
+      glow.addColorStop(0, `rgba(160, 230, 250, 0.12)`);
+      glow.addColorStop(1, `rgba(100, 200, 230, 0)`);
+    } else {
+      glow.addColorStop(0, `rgba(200,160,200,0.08)`);
+      glow.addColorStop(1, `rgba(200,160,200,0)`);
+    }
     ctx.fillStyle = glow;
     ctx.beginPath();
     ctx.arc(this.x, this.y, r * 1.4, 0, Math.PI * 2);
@@ -339,10 +453,17 @@ class Bubble {
       this.y,
       r
     );
-    grad.addColorStop(0, `rgba(255,255,255,0.25)`);
-    grad.addColorStop(0.4, `rgba(220,190,230,0.1)`);
-    grad.addColorStop(0.8, `rgba(180,140,200,0.15)`);
-    grad.addColorStop(1, `rgba(140,100,160,0.3)`);
+    if (msgBubble) {
+      grad.addColorStop(0, `rgba(255,255,255,0.32)`);
+      grad.addColorStop(0.35, `rgba(190, 240, 255, 0.14)`);
+      grad.addColorStop(0.7, `rgba(120, 210, 235, 0.18)`);
+      grad.addColorStop(1, `rgba(70, 180, 210, 0.32)`);
+    } else {
+      grad.addColorStop(0, `rgba(255,255,255,0.25)`);
+      grad.addColorStop(0.4, `rgba(220,190,230,0.1)`);
+      grad.addColorStop(0.8, `rgba(180,140,200,0.15)`);
+      grad.addColorStop(1, `rgba(140,100,160,0.3)`);
+    }
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
@@ -350,12 +471,31 @@ class Bubble {
 
     ctx.beginPath();
     ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(220,190,220,${0.35 * this.opacity})`;
+    const lifeT = Math.min(1, this.age / Math.max(1, this.maxAge));
+    if (msgBubble) {
+      const [rh, gh, bh] = hslToRgb(175 + lifeT * 45, 58, 74);
+      const br = 200;
+      const bgc = 235;
+      const bb = 248;
+      const R = Math.round(br + (rh - br) * lifeT);
+      const G = Math.round(bgc + (gh - bgc) * lifeT);
+      const B = Math.round(bb + (bh - bb) * lifeT);
+      ctx.strokeStyle = `rgba(${R},${G},${B},${0.4 * this.opacity})`;
+    } else {
+      const [rh, gh, bh] = hslToRgb(lifeT * 300, 72, 73);
+      const br = 220;
+      const bgc = 190;
+      const bb = 220;
+      const R = Math.round(br + (rh - br) * lifeT);
+      const G = Math.round(bgc + (gh - bgc) * lifeT);
+      const B = Math.round(bb + (bh - bb) * lifeT);
+      ctx.strokeStyle = `rgba(${R},${G},${B},${0.35 * this.opacity})`;
+    }
     ctx.lineWidth = 1.2;
     ctx.stroke();
 
     ctx.globalAlpha = this.opacity * 0.85;
-    ctx.fillStyle = PETAL.pale;
+    ctx.fillStyle = msgBubble ? "#e8fbff" : PETAL.pale;
     ctx.font = `${Math.max(10, r * 0.38)}px 'Hiragino Kaku Gothic Pro', 'Yu Gothic', sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -414,10 +554,35 @@ export default function App() {
   const bgClockStartRef = useRef(null);
   const autoPopBurstsRef = useRef([]);
   const lastAutoPopTimeRef = useRef(null);
+  const audioCtxRef = useRef(null);
 
   const [text, setText] = useState("");
   const [launched, setLaunched] = useState(false);
   const [hint, setHint] = useState(true);
+  const [burstFloatMsgs, setBurstFloatMsgs] = useState([]);
+
+  const onBubbleBurstRef = useRef(() => {});
+  onBubbleBurstRef.current = (bubble) => {
+    if (!bubble.text || !bubble.text.trim()) return;
+    const msg =
+      BURST_FLOAT_MESSAGES[
+        Math.floor(Math.random() * BURST_FLOAT_MESSAGES.length)
+      ];
+    const id = `${performance.now()}-${bubble.id}`;
+    setBurstFloatMsgs((prev) => [
+      ...prev,
+      {
+        id,
+        left: window.innerWidth / 2,
+        top: window.innerHeight * 0.46,
+        text: msg,
+      },
+    ]);
+  };
+
+  const removeBurstFloatMsg = useCallback((id) => {
+    setBurstFloatMsgs((prev) => prev.filter((m) => m.id !== id));
+  }, []);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -513,7 +678,9 @@ export default function App() {
     );
 
     bubblesRef.current.forEach((b) => {
-      b.update(null);
+      b.update((bubble) => {
+        onBubbleBurstRef.current(bubble);
+      });
       if (b.phase === "float") {
         b.drawFloat(ctx);
       } else {
@@ -550,10 +717,16 @@ export default function App() {
     const H = canvas.height;
     const size = Math.min(W, H) * (0.18 + Math.random() * 0.12);
     const x = W * 0.2 + Math.random() * W * 0.6;
-    const y = H * 0.75 + Math.random() * H * 0.1;
+    const y = H * 0.38 + Math.random() * H * 0.22;
     bubblesRef.current.push(new Bubble(x, y, t, size));
     ambientReleasedRef.current = true;
     lastAutoPopTimeRef.current = null;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC && !audioCtxRef.current) {
+      audioCtxRef.current = new AC();
+    }
+    bubbleAudioBridge.ctx = audioCtxRef.current;
+    void audioCtxRef.current?.resume?.();
     setText("");
     setLaunched(true);
     setHint(false);
@@ -582,6 +755,30 @@ export default function App() {
       }}
     >
       <canvas ref={canvasRef} style={{ position: "absolute", inset: 0 }} />
+
+      {burstFloatMsgs.map((m) => (
+        <div
+          key={m.id}
+          style={{
+            position: "fixed",
+            left: m.left,
+            top: m.top,
+            transform: "translate(-50%, -50%)",
+            pointerEvents: "none",
+            color: "#ffffff",
+            fontSize: 35,
+            fontWeight: 300,
+            maxWidth: "min(90vw, 360px)",
+            textAlign: "center",
+            lineHeight: 1.4,
+            zIndex: 20,
+            animation: "burstFloatMsgUp 3s ease-out forwards",
+          }}
+          onAnimationEnd={() => removeBurstFloatMsg(m.id)}
+        >
+          {m.text}
+        </div>
+      ))}
 
       <div
         style={{
@@ -691,6 +888,16 @@ export default function App() {
       </div>
 
       <style>{`
+        @keyframes burstFloatMsgUp {
+          from {
+            opacity: 1;
+            transform: translate(-50%, -50%);
+          }
+          to {
+            opacity: 0;
+            transform: translate(-50%, calc(-50% - 30px));
+          }
+        }
         textarea::placeholder { color: rgba(255,255,255,0.9); }
         textarea:focus { border-color: rgba(220,190,220,0.5); background: rgba(255,255,255,0.07); }
         button:hover { background: rgba(180,120,180,0.35) !important; border-color: rgba(220,190,220,0.65) !important; }

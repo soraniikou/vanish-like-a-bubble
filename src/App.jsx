@@ -134,6 +134,46 @@ function playWindChimeBurst(audioCtx) {
   }
 }
 
+/** 文字泡破裂時に 25% で再生する voice（public）— 1本ずつキュー */
+const BURST_VOICE_URLS = [
+  "/breath.mp3",
+  "/cry.mp3",
+  "/dream.mp3",
+  "/oyasumi.mp3",
+  "/voice4.mp3",
+  "/wasurete.mp3",
+];
+
+const burstVoiceQueueState = {
+  queue: [],
+  playing: false,
+};
+
+function playNextBurstVoiceIfIdle() {
+  if (burstVoiceQueueState.playing) return;
+  const url = burstVoiceQueueState.queue.shift();
+  if (!url) return;
+  burstVoiceQueueState.playing = true;
+  const audio = new Audio(url);
+  audio.volume = 0.7;
+  const finish = () => {
+    audio.removeEventListener("ended", finish);
+    audio.removeEventListener("error", finish);
+    burstVoiceQueueState.playing = false;
+    playNextBurstVoiceIfIdle();
+  };
+  audio.addEventListener("ended", finish);
+  audio.addEventListener("error", finish);
+  void audio.play().catch(finish);
+}
+
+function enqueueBurstVoiceSample() {
+  const url =
+    BURST_VOICE_URLS[Math.floor(Math.random() * BURST_VOICE_URLS.length)];
+  burstVoiceQueueState.queue.push(url);
+  playNextBurstVoiceIfIdle();
+}
+
 /** HSL（h:0–360, s/l:%）→ RGB 0–255 */
 function hslToRgb(h, s, l) {
   s /= 100;
@@ -564,6 +604,9 @@ export default function App() {
   const onBubbleBurstRef = useRef(() => {});
   onBubbleBurstRef.current = (bubble) => {
     if (!bubble.text || !bubble.text.trim()) return;
+    if (Math.random() < 0.25) {
+      enqueueBurstVoiceSample();
+    }
     const msg =
       BURST_FLOAT_MESSAGES[
         Math.floor(Math.random() * BURST_FLOAT_MESSAGES.length)

@@ -75,8 +75,8 @@ const BUBBLE_MOTION_SCALE = 0.5;
 const bubbleAudioBridge = { ctx: null };
 
 /** 1オクターブ下の落ち着いた管ベル音程（元: 1047 / 1319 / 1568 / 2093） */
-const WIND_CHIME_FREQS = [523.25, 659.25, 783.99, 1046.5];
-const WIND_CHIME_START_OFFSETS = [0, 0.15, 0.3, 0.5];
+const WIND_CHIME_FREQS = [261.63, 329.63, 392.00, 523.25];
+const WIND_CHIME_START_OFFSETS = [0, 0.3, 0.6, 1.0];
 const WIND_CHIME_DETUNE_CENTS = [-5, 4, -3, 6];
 
 /**
@@ -90,7 +90,7 @@ function playWindChimeBurst(audioCtx) {
     const master = audioCtx.createGain();
     master.connect(audioCtx.destination);
     master.gain.setValueAtTime(0.0001, t0);
-    master.gain.linearRampToValueAtTime(0.065, t0 + 0.14);
+    master.gain.linearRampToValueAtTime(0.065, t0 + 0.35);
     master.gain.linearRampToValueAtTime(0, t0 + 6);
 
     WIND_CHIME_FREQS.forEach((freq, i) => {

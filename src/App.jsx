@@ -943,7 +943,7 @@ export default function App() {
             transform: translate(-50%, calc(-50% - 30px));
           }
         }
-        textarea::placeholder { color: rgba(255,255,255,0.9); }
+        textarea::placeholder { color: rgba(255,255,255,0.2); }
         textarea:focus { border-color: rgba(220,190,220,0.5); background: rgba(255,255,255,0.07); }
         button:hover { background: rgba(180,120,180,0.35) !important; border-color: rgba(220,190,220,0.65) !important; }
       `}</style>

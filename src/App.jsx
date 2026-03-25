@@ -913,7 +913,7 @@ export default function App() {
           style={{
             background: launched
               ? "rgba(200,160,200,0.05)"
-              : "rgba(140,90,140,0.22)",
+              : "rgba(140,90,140,0.18)",
             border: "1px solid rgba(220,190,220,0.18)",
             borderRadius: "50px",
             color: PETAL.pale,

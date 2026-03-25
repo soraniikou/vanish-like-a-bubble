@@ -912,7 +912,7 @@ export default function App() {
           onClick={launch}
           style={{
             background: launched
-              ? "rgba(200,160,200,0.35)"
+              ? "rgba(200,160,200,0.05)"
               : "rgba(140,90,140,0.22)",
             border: "1px solid rgba(220,190,220,0.4)",
             borderRadius: "50px",

@@ -595,6 +595,7 @@ export default function App() {
   const autoPopBurstsRef = useRef([]);
   const lastAutoPopTimeRef = useRef(null);
   const audioCtxRef = useRef(null);
+  const textBubbleBurstCountRef = useRef(0);
 
   const [text, setText] = useState("");
   const [launched, setLaunched] = useState(false);
@@ -604,7 +605,8 @@ export default function App() {
   const onBubbleBurstRef = useRef(() => {});
   onBubbleBurstRef.current = (bubble) => {
     if (!bubble.text || !bubble.text.trim()) return;
-    if (Math.random() < 0.25) {
+    textBubbleBurstCountRef.current += 1;
+    if (textBubbleBurstCountRef.current % 3 === 0) {
       enqueueBurstVoiceSample();
     }
     const msg =
@@ -815,7 +817,7 @@ export default function App() {
             textAlign: "center",
             lineHeight: 1.4,
             zIndex: 20,
-            animation: "burstFloatMsgUp 3s ease-out forwards",
+            animation: "burstFloatMsgUp 9s ease-out forwards",
           }}
           onAnimationEnd={() => removeBurstFloatMsg(m.id)}
         >

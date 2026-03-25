@@ -914,14 +914,14 @@ export default function App() {
             background: launched
               ? "rgba(200,160,200,0.05)"
               : "rgba(140,90,140,0.22)",
-            border: "1px solid rgba(220,190,220,0.4)",
+            border: "1px solid rgba(220,190,220,0.18)",
             borderRadius: "50px",
             color: PETAL.pale,
             fontSize: "clamp(13px, 3vw, 15px)",
             padding: "12px 40px",
             cursor: "pointer",
             letterSpacing: "0.25em",
-            backdropFilter: "blur(8px)",
+            backdropFilter: "blur(10px)",
             transition: "all 0.3s ease",
             outline: "none",
             fontFamily: "inherit",

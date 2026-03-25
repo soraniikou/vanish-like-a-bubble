@@ -916,7 +916,7 @@ export default function App() {
               : "rgba(140,90,140,0.18)",
             border: "1px solid rgba(220,190,220,0.18)",
             borderRadius: "50px",
-            color: "E0D0E0",
+            color: "#E0D0E0",
             fontSize: "clamp(13px, 3vw, 15px)",
             padding: "12px 40px",
             cursor: "pointer",

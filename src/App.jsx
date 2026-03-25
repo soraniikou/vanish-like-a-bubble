@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
 const PETAL = {
-  pale: "#f0e8f0",
+  pale: "#888888",
   blush: "#ddc0dd",
   violet: "#c8a0c8",
   deep: "#8b5a8b",

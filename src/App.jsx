@@ -71,109 +71,6 @@ const BURST_DURATIONS = BURST_SECOND_OPTIONS.map((s) => s * BURST_FPS);
 
 const BUBBLE_MOTION_SCALE = 0.5;
 
-/** Web Audio 用（文字付き泡の破裂音のみ） */
-const bubbleAudioBridge = { ctx: null };
-
-/** 1オクターブ下の落ち着いた管ベル音程（元: 1047 / 1319 / 1568 / 2093） */
-const WIND_CHIME_FREQS = [523.25, 659.25, 783.99, 1046.5];
-const WIND_CHIME_START_OFFSETS = [0, 0.15, 0.3, 0.5];
-const WIND_CHIME_DETUNE_CENTS = [-5, 4, -3, 6];
-
-/**
- * ウィンドベル風：4音をずらして連なるように重ね、Delay＋弱いフィードバックで余韻。
- * マスターは控えめ（約 0.065）・6 秒フェードはそのまま。
- */
-function playWindChimeBurst(audioCtx) {
-  if (!audioCtx) return;
-  try {
-    const t0 = audioCtx.currentTime;
-    const master = audioCtx.createGain();
-    master.connect(audioCtx.destination);
-    master.gain.setValueAtTime(0.0001, t0);
-    master.gain.linearRampToValueAtTime(0.065, t0 + 0.14);
-    master.gain.linearRampToValueAtTime(0, t0 + 6);
-
-    WIND_CHIME_FREQS.forEach((freq, i) => {
-      const tStart = t0 + WIND_CHIME_START_OFFSETS[i];
-      const osc = audioCtx.createOscillator();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(freq, tStart);
-      osc.detune.setValueAtTime(WIND_CHIME_DETUNE_CENTS[i], tStart);
-
-      const noteGain = audioCtx.createGain();
-      noteGain.gain.setValueAtTime(0.0001, tStart);
-      noteGain.gain.exponentialRampToValueAtTime(0.26, tStart + 0.07);
-      noteGain.gain.exponentialRampToValueAtTime(0.0004, tStart + 5.8);
-
-      const delay = audioCtx.createDelay(1.0);
-      delay.delayTime.value = 0.095 + i * 0.028;
-
-      const feedback = audioCtx.createGain();
-      feedback.gain.value = 0.13;
-
-      const wet = audioCtx.createGain();
-      wet.gain.value = 0.62;
-
-      const dry = audioCtx.createGain();
-      dry.gain.value = 0.38;
-
-      osc.connect(noteGain);
-      noteGain.connect(delay);
-      noteGain.connect(dry);
-      dry.connect(master);
-      delay.connect(wet);
-      wet.connect(master);
-      delay.connect(feedback);
-      feedback.connect(delay);
-
-      osc.start(tStart);
-      osc.stop(tStart + 6.2);
-    });
-  } catch (_) {
-    /* suspended など */
-  }
-}
-
-/** 文字泡破裂時に 25% で再生する voice（public）— 1本ずつキュー */
-const BURST_VOICE_URLS = [
-  "/breath.mp3",
-  "/cry.mp3",
-  "/dream.mp3",
-  "/oyasumi.mp3",
-  "/voice4.mp3",
-  "/wasurete.mp3",
-];
-
-const burstVoiceQueueState = {
-  queue: [],
-  playing: false,
-};
-
-function playNextBurstVoiceIfIdle() {
-  if (burstVoiceQueueState.playing) return;
-  const url = burstVoiceQueueState.queue.shift();
-  if (!url) return;
-  burstVoiceQueueState.playing = true;
-  const audio = new Audio(url);
-  audio.volume = 0.7;
-  const finish = () => {
-    audio.removeEventListener("ended", finish);
-    audio.removeEventListener("error", finish);
-    burstVoiceQueueState.playing = false;
-    playNextBurstVoiceIfIdle();
-  };
-  audio.addEventListener("ended", finish);
-  audio.addEventListener("error", finish);
-  void audio.play().catch(finish);
-}
-
-function enqueueBurstVoiceSample() {
-  const url =
-    BURST_VOICE_URLS[Math.floor(Math.random() * BURST_VOICE_URLS.length)];
-  burstVoiceQueueState.queue.push(url);
-  playNextBurstVoiceIfIdle();
-}
-
 /** HSL（h:0–360, s/l:%）→ RGB 0–255 */
 function hslToRgb(h, s, l) {
   s /= 100;
@@ -434,9 +331,6 @@ class Bubble {
   }
 
   burst() {
-    if (this.text && this.text.trim().length > 0) {
-      playWindChimeBurst(bubbleAudioBridge.ctx);
-    }
     this.phase = "burst";
     const count = 20 + Math.floor(Math.random() * 10);
     const msgBubble = this.text && this.text.trim().length > 0;
@@ -594,8 +488,7 @@ export default function App() {
   const bgClockStartRef = useRef(null);
   const autoPopBurstsRef = useRef([]);
   const lastAutoPopTimeRef = useRef(null);
-  const audioCtxRef = useRef(null);
-  const textBubbleBurstCountRef = useRef(0);
+  const stoppedRef = useRef(false);
 
   const [text, setText] = useState("");
   const [launched, setLaunched] = useState(false);
@@ -605,10 +498,6 @@ export default function App() {
   const onBubbleBurstRef = useRef(() => {});
   onBubbleBurstRef.current = (bubble) => {
     if (!bubble.text || !bubble.text.trim()) return;
-    textBubbleBurstCountRef.current += 1;
-    if (textBubbleBurstCountRef.current % 3 === 0) {
-      enqueueBurstVoiceSample();
-    }
     const msg =
       BURST_FLOAT_MESSAGES[
         Math.floor(Math.random() * BURST_FLOAT_MESSAGES.length)
@@ -630,6 +519,7 @@ export default function App() {
   }, []);
 
   const draw = useCallback(() => {
+    if (stoppedRef.current) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -766,17 +656,23 @@ export default function App() {
     bubblesRef.current.push(new Bubble(x, y, t, size));
     ambientReleasedRef.current = true;
     lastAutoPopTimeRef.current = null;
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (AC && !audioCtxRef.current) {
-      audioCtxRef.current = new AC();
-    }
-    bubbleAudioBridge.ctx = audioCtxRef.current;
-    void audioCtxRef.current?.resume?.();
     setText("");
     setLaunched(true);
     setHint(false);
     setTimeout(() => setLaunched(false), 600);
   }, [text]);
+
+  const stopApp = useCallback(() => {
+    stoppedRef.current = true;
+    if (animRef.current) {
+      cancelAnimationFrame(animRef.current);
+      animRef.current = null;
+    }
+    window.close();
+    window.setTimeout(() => {
+      window.location.href = "about:blank";
+    }, 120);
+  }, []);
 
   const handleKey = useCallback(
     (e) => {
@@ -811,7 +707,7 @@ export default function App() {
             transform: "translate(-50%, -50%)",
             pointerEvents: "none",
             color: "#ffffff",
-            fontSize: 35,
+            fontSize: 17.5,
             fontWeight: 300,
             maxWidth: "min(90vw, 360px)",
             textAlign: "center",
@@ -930,6 +826,28 @@ export default function App() {
         >
           Release as a bubble
         </button>
+
+        <button
+          type="button"
+          className="stop-btn"
+          onClick={stopApp}
+          style={{
+            background: "transparent",
+            border: "1px solid rgba(220,190,220,0.28)",
+            borderRadius: "999px",
+            color: "rgba(220,190,220,0.55)",
+            fontSize: "clamp(10px, 2.2vw, 12px)",
+            padding: "6px 22px",
+            cursor: "pointer",
+            letterSpacing: "0.12em",
+            backdropFilter: "blur(6px)",
+            transition: "all 0.25s ease",
+            outline: "none",
+            fontFamily: "inherit",
+          }}
+        >
+          Stop
+        </button>
       </div>
 
       <style>{`
@@ -945,7 +863,8 @@ export default function App() {
         }
         textarea::placeholder { color: rgba(255,255,255,0.9); }
         textarea:focus { border-color: rgba(220,190,220,0.5); background: rgba(255,255,255,0.07); }
-        button:hover { background: rgba(180,120,180,0.35) !important; border-color: rgba(220,190,220,0.65) !important; }
+        button:hover:not(.stop-btn) { background: rgba(180,120,180,0.35) !important; border-color: rgba(220,190,220,0.65) !important; }
+        button.stop-btn:hover { background: rgba(220,190,220,0.1) !important; border-color: rgba(220,190,220,0.45) !important; color: rgba(240,230,240,0.75) !important; }
       `}</style>
     </div>
   );

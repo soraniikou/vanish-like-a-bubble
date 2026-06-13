@@ -56,6 +56,9 @@ const BURST_DURATIONS = BURST_SECOND_OPTIONS.map((s) => s * BURST_FPS);
 
 const BUBBLE_MOTION_SCALE = 0.5;
 
+const STOP_FADE_MS = 2500;
+const STOP_STILL_MS = 500;
+
 /** Web Audio 用（文字付き泡のウィンドベルのみ） */
 const bubbleAudioBridge = { ctx: null };
 
@@ -535,15 +538,17 @@ export default function App() {
   const bgClockStartRef = useRef(null);
   const autoPopBurstsRef = useRef([]);
   const lastAutoPopTimeRef = useRef(null);
-  const stoppedRef = useRef(false);
+  const exitingRef = useRef(false);
+  const fadeOverlayRef = useRef(null);
+  const exitTimerRef = useRef(null);
   const audioCtxRef = useRef(null);
 
   const [text, setText] = useState("");
   const [launched, setLaunched] = useState(false);
   const [hint, setHint] = useState(true);
+  const [isExiting, setIsExiting] = useState(false);
 
   const draw = useCallback(() => {
-    if (stoppedRef.current) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -665,6 +670,29 @@ export default function App() {
     };
   }, [draw]);
 
+  useEffect(() => {
+    if (!isExiting) return;
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const overlay = fadeOverlayRef.current;
+        if (overlay) overlay.style.opacity = "1";
+      });
+    });
+    exitTimerRef.current = window.setTimeout(() => {
+      window.close();
+      window.setTimeout(() => {
+        window.location.href = "about:blank";
+      }, 120);
+    }, STOP_FADE_MS + STOP_STILL_MS);
+    return () => {
+      cancelAnimationFrame(raf);
+      if (exitTimerRef.current) {
+        clearTimeout(exitTimerRef.current);
+        exitTimerRef.current = null;
+      }
+    };
+  }, [isExiting]);
+
   const launch = useCallback(() => {
     const t = text.trim();
     if (!t) return;
@@ -691,15 +719,14 @@ export default function App() {
   }, [text]);
 
   const stopApp = useCallback(() => {
-    stoppedRef.current = true;
+    if (exitingRef.current) return;
+    exitingRef.current = true;
+    setIsExiting(true);
+    void audioCtxRef.current?.suspend?.();
     if (animRef.current) {
       cancelAnimationFrame(animRef.current);
       animRef.current = null;
     }
-    window.close();
-    window.setTimeout(() => {
-      window.location.href = "about:blank";
-    }, 120);
   }, []);
 
   const handleKey = useCallback(
@@ -725,134 +752,154 @@ export default function App() {
     >
       <canvas ref={canvasRef} style={{ position: "absolute", inset: 0 }} />
 
-      <div
-        style={{
-          position: "absolute",
-          top: "5%",
-          left: 0,
-          right: 0,
-          textAlign: "center",
-          pointerEvents: "none",
-        }}
-      >
-        <div
-          style={{
-            color: "#9333ea",
-            fontSize: "clamp(22px, 4vw, 28px)",
-            letterSpacing: "0.12em",
-            fontWeight: 600,
-            fontFamily:
-              "'Dancing Script', 'Brush Script MT', 'Segoe Script', cursive",
-          }}
-        >
-          vanish like a bubble
-        </div>
-      </div>
+      {!isExiting && (
+        <>
+          <div
+            style={{
+              position: "absolute",
+              top: "5%",
+              left: 0,
+              right: 0,
+              textAlign: "center",
+              pointerEvents: "none",
+            }}
+          >
+            <div
+              style={{
+                color: "#9333ea",
+                fontSize: "clamp(22px, 4vw, 28px)",
+                letterSpacing: "0.12em",
+                fontWeight: 600,
+                fontFamily:
+                  "'Dancing Script', 'Brush Script MT', 'Segoe Script', cursive",
+              }}
+            >
+              vanish like a bubble
+            </div>
+          </div>
 
-      {hint && (
-        <div
-          style={{
-            position: "absolute",
-            top: "20%",
-            left: 0,
-            right: 0,
-            textAlign: "center",
-            pointerEvents: "none",
-            color: "rgba(220,190,220,0.28)",
-            fontSize: "clamp(12px, 2.5vw, 16px)",
-            letterSpacing: "0.15em",
-            lineHeight: 2,
-          }}
-        >
-          <div>手放したい言葉を</div>
-          <div>泡に込めて、空へ</div>
-        </div>
+          {hint && (
+            <div
+              style={{
+                position: "absolute",
+                top: "20%",
+                left: 0,
+                right: 0,
+                textAlign: "center",
+                pointerEvents: "none",
+                color: "rgba(220,190,220,0.28)",
+                fontSize: "clamp(12px, 2.5vw, 16px)",
+                letterSpacing: "0.15em",
+                lineHeight: 2,
+              }}
+            >
+              <div>手放したい言葉を</div>
+              <div>泡に込めて、空へ</div>
+            </div>
+          )}
+
+          <div
+            style={{
+              position: "absolute",
+              bottom: "8%",
+              left: "50%",
+              transform: "translateX(-50%)",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "16px",
+              width: "min(90vw, 420px)",
+            }}
+          >
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={handleKey}
+              placeholder="Write your words here…"
+              rows={2}
+              style={{
+                width: "100%",
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(220,190,220,0.25)",
+                borderRadius: "16px",
+                color: PETAL.pale,
+                fontSize: "clamp(14px, 3.5vw, 17px)",
+                padding: "14px 20px",
+                outline: "none",
+                resize: "none",
+                backdropFilter: "blur(8px)",
+                boxSizing: "border-box",
+                letterSpacing: "0.08em",
+                lineHeight: 1.7,
+                caretColor: PETAL.blush,
+                fontFamily: "inherit",
+              }}
+            />
+
+            <button
+              type="button"
+              onClick={launch}
+              style={{
+                background: launched
+                  ? "rgba(200,160,200,0.35)"
+                  : "rgba(140,90,140,0.22)",
+                border: "1px solid rgba(220,190,220,0.4)",
+                borderRadius: "35px",
+                color: PETAL.pale,
+                fontSize: "clamp(9px, 2.1vw, 10.5px)",
+                padding: "8px 28px",
+                cursor: "pointer",
+                letterSpacing: "0.25em",
+                backdropFilter: "blur(8px)",
+                transition: "all 0.3s ease",
+                outline: "none",
+                fontFamily: "inherit",
+                transform: launched ? "scale(0.96)" : "scale(1)",
+              }}
+            >
+              Release as a bubble
+            </button>
+
+            <button
+              type="button"
+              className="stop-btn"
+              onClick={stopApp}
+              style={{
+                background: "transparent",
+                border: "1px solid rgba(220,190,220,0.28)",
+                borderRadius: "999px",
+                color: "rgba(220,190,220,0.55)",
+                fontSize: "clamp(10px, 2.2vw, 12px)",
+                padding: "6px 22px",
+                cursor: "pointer",
+                letterSpacing: "0.12em",
+                backdropFilter: "blur(6px)",
+                transition: "all 0.25s ease",
+                outline: "none",
+                fontFamily: "inherit",
+              }}
+            >
+              Stop
+            </button>
+          </div>
+        </>
       )}
 
-      <div
-        style={{
-          position: "absolute",
-          bottom: "8%",
-          left: "50%",
-          transform: "translateX(-50%)",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: "16px",
-          width: "min(90vw, 420px)",
-        }}
-      >
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={handleKey}
-          placeholder="Write your words here…"
-          rows={2}
+      {isExiting && (
+        <div
+          ref={fadeOverlayRef}
+          aria-hidden
           style={{
-            width: "100%",
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(220,190,220,0.25)",
-            borderRadius: "16px",
-            color: PETAL.pale,
-            fontSize: "clamp(14px, 3.5vw, 17px)",
-            padding: "14px 20px",
-            outline: "none",
-            resize: "none",
-            backdropFilter: "blur(8px)",
-            boxSizing: "border-box",
-            letterSpacing: "0.08em",
-            lineHeight: 1.7,
-            caretColor: PETAL.blush,
-            fontFamily: "inherit",
+            position: "fixed",
+            inset: 0,
+            background: "#000000",
+            opacity: 0,
+            transition: `opacity ${STOP_FADE_MS}ms ease-in-out`,
+            pointerEvents: "none",
+            zIndex: 100,
           }}
         />
-
-        <button
-          type="button"
-          onClick={launch}
-          style={{
-            background: launched
-              ? "rgba(200,160,200,0.35)"
-              : "rgba(140,90,140,0.22)",
-            border: "1px solid rgba(220,190,220,0.4)",
-            borderRadius: "35px",
-            color: PETAL.pale,
-            fontSize: "clamp(9px, 2.1vw, 10.5px)",
-            padding: "8px 28px",
-            cursor: "pointer",
-            letterSpacing: "0.25em",
-            backdropFilter: "blur(8px)",
-            transition: "all 0.3s ease",
-            outline: "none",
-            fontFamily: "inherit",
-            transform: launched ? "scale(0.96)" : "scale(1)",
-          }}
-        >
-          Release as a bubble
-        </button>
-
-        <button
-          type="button"
-          className="stop-btn"
-          onClick={stopApp}
-          style={{
-            background: "transparent",
-            border: "1px solid rgba(220,190,220,0.28)",
-            borderRadius: "999px",
-            color: "rgba(220,190,220,0.55)",
-            fontSize: "clamp(10px, 2.2vw, 12px)",
-            padding: "6px 22px",
-            cursor: "pointer",
-            letterSpacing: "0.12em",
-            backdropFilter: "blur(6px)",
-            transition: "all 0.25s ease",
-            outline: "none",
-            fontFamily: "inherit",
-          }}
-        >
-          Stop
-        </button>
-      </div>
+      )}
 
       <style>{`
         textarea::placeholder { color: rgba(255,255,255,0.9); }

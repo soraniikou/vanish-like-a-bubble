@@ -56,8 +56,7 @@ const BURST_DURATIONS = BURST_SECOND_OPTIONS.map((s) => s * BURST_FPS);
 
 const BUBBLE_MOTION_SCALE = 0.5;
 
-const STOP_FADE_MS = 2500;
-const STOP_STILL_MS = 500;
+const BACK_FADE_MS = 2000;
 
 /** Web Audio 用（文字付き泡のウィンドベルのみ） */
 const bubbleAudioBridge = { ctx: null };
@@ -538,15 +537,30 @@ export default function App() {
   const bgClockStartRef = useRef(null);
   const autoPopBurstsRef = useRef([]);
   const lastAutoPopTimeRef = useRef(null);
-  const exitingRef = useRef(false);
+  const backingRef = useRef(false);
   const fadeOverlayRef = useRef(null);
-  const exitTimerRef = useRef(null);
   const audioCtxRef = useRef(null);
 
   const [text, setText] = useState("");
   const [launched, setLaunched] = useState(false);
   const [hint, setHint] = useState(true);
-  const [isExiting, setIsExiting] = useState(false);
+  const [isBacking, setIsBacking] = useState(false);
+
+  const resetToStart = useCallback(() => {
+    bubblesRef.current = [];
+    ambientRef.current = [];
+    ambientReleasedRef.current = false;
+    ambientSpawnAccRef.current = 0;
+    autoPopBurstsRef.current = [];
+    lastAutoPopTimeRef.current = null;
+    bgClockStartRef.current = null;
+    lastViewportRef.current = { w: 0, h: 0 };
+    ambientTargetRef.current = 0;
+    setText("");
+    setHint(true);
+    setLaunched(false);
+    void audioCtxRef.current?.suspend?.();
+  }, []);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -671,29 +685,42 @@ export default function App() {
   }, [draw]);
 
   useEffect(() => {
-    if (!isExiting) return;
+    if (!isBacking) return;
+
+    let fadeInTimer = null;
+    let doneTimer = null;
+
     const raf = requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         const overlay = fadeOverlayRef.current;
         if (overlay) overlay.style.opacity = "1";
       });
     });
-    exitTimerRef.current = window.setTimeout(() => {
-      window.close();
-      window.setTimeout(() => {
-        window.location.href = "about:blank";
-      }, 120);
-    }, STOP_FADE_MS + STOP_STILL_MS);
+
+    fadeInTimer = window.setTimeout(() => {
+      resetToStart();
+      animRef.current = requestAnimationFrame(draw);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const overlay = fadeOverlayRef.current;
+          if (overlay) overlay.style.opacity = "0";
+        });
+      });
+      doneTimer = window.setTimeout(() => {
+        backingRef.current = false;
+        setIsBacking(false);
+      }, BACK_FADE_MS);
+    }, BACK_FADE_MS);
+
     return () => {
       cancelAnimationFrame(raf);
-      if (exitTimerRef.current) {
-        clearTimeout(exitTimerRef.current);
-        exitTimerRef.current = null;
-      }
+      if (fadeInTimer) clearTimeout(fadeInTimer);
+      if (doneTimer) clearTimeout(doneTimer);
     };
-  }, [isExiting]);
+  }, [isBacking, resetToStart, draw]);
 
   const launch = useCallback(() => {
+    if (backingRef.current) return;
     const t = text.trim();
     if (!t) return;
     const canvas = canvasRef.current;
@@ -718,10 +745,10 @@ export default function App() {
     setTimeout(() => setLaunched(false), 600);
   }, [text]);
 
-  const stopApp = useCallback(() => {
-    if (exitingRef.current) return;
-    exitingRef.current = true;
-    setIsExiting(true);
+  const goBack = useCallback(() => {
+    if (backingRef.current) return;
+    backingRef.current = true;
+    setIsBacking(true);
     void audioCtxRef.current?.suspend?.();
     if (animRef.current) {
       cancelAnimationFrame(animRef.current);
@@ -752,7 +779,7 @@ export default function App() {
     >
       <canvas ref={canvasRef} style={{ position: "absolute", inset: 0 }} />
 
-      {!isExiting && (
+      {!isBacking && (
         <>
           <div
             style={{
@@ -862,8 +889,8 @@ export default function App() {
 
             <button
               type="button"
-              className="stop-btn"
-              onClick={stopApp}
+              className="back-btn"
+              onClick={goBack}
               style={{
                 background: "transparent",
                 border: "1px solid rgba(220,190,220,0.28)",
@@ -879,13 +906,13 @@ export default function App() {
                 fontFamily: "inherit",
               }}
             >
-              Stop
+              back
             </button>
           </div>
         </>
       )}
 
-      {isExiting && (
+      {isBacking && (
         <div
           ref={fadeOverlayRef}
           aria-hidden
@@ -894,7 +921,7 @@ export default function App() {
             inset: 0,
             background: "#000000",
             opacity: 0,
-            transition: `opacity ${STOP_FADE_MS}ms ease-in-out`,
+            transition: `opacity ${BACK_FADE_MS}ms ease-in-out`,
             pointerEvents: "none",
             zIndex: 100,
           }}
@@ -904,8 +931,8 @@ export default function App() {
       <style>{`
         textarea::placeholder { color: rgba(255,255,255,0.9); }
         textarea:focus { border-color: rgba(220,190,220,0.5); background: rgba(255,255,255,0.07); }
-        button:hover:not(.stop-btn) { background: rgba(180,120,180,0.35) !important; border-color: rgba(220,190,220,0.65) !important; }
-        button.stop-btn:hover { background: rgba(220,190,220,0.1) !important; border-color: rgba(220,190,220,0.45) !important; color: rgba(240,230,240,0.75) !important; }
+        button:hover:not(.back-btn) { background: rgba(180,120,180,0.35) !important; border-color: rgba(220,190,220,0.65) !important; }
+        button.back-btn:hover { background: rgba(220,190,220,0.1) !important; border-color: rgba(220,190,220,0.45) !important; color: rgba(240,230,240,0.75) !important; }
       `}</style>
     </div>
   );

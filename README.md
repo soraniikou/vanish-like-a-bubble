@@ -1,4 +1,5 @@
 個人情報の取り扱いについて
+
 このアプリに入力した文章は、あなたのブラウザの中だけで処理されます。サーバーやデータベースには一切送信・保存されません。
 入力内容はどこにも記録されません
 ページを閉じたり更新したりすると、内容は完全に消えます
@@ -10,6 +11,7 @@
 ![awa3](./%61%77%61%33%2e%70%6e%67)
 ![awa4](./%61%77%61%34%2e%70%6e%67)
 ![awa5](./%61%77%61%35%2e%70%6e%67)
+
 # React + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.

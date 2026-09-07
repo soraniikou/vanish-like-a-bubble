@@ -1,3 +1,7 @@
+![awa2](./%61%77%61%32%2e%70%6e%67)
+![awa3](./%61%77%61%33%2e%70%6e%67)
+![awa4](./%61%77%61%34%2e%70%6e%67)
+![awa5](./%61%77%61%35%2e%70%6e%67)
 # React + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
